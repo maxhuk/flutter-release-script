@@ -38,6 +38,11 @@ success() { echo -e "  ${GREEN}✔${NC}  $1"; }
 warn()    { echo -e "  ${YELLOW}⚠${NC}  $1"; }
 fail()    { echo -e "  ${RED}✘${NC}  $1"; exit 1; }
 
+cleanup() {
+  rm -rf "metadata/android" "metadata/ios"
+}
+trap cleanup EXIT
+
 # ── Parse CLI flags ──────────────────────────────────────────
 for arg in "$@"; do
   case "$arg" in
