@@ -68,9 +68,9 @@ $DRY_RUN && warn "DRY RUN — nothing will be uploaded or submitted."
 step "Reading version from ${PUBSPEC}"
 [[ ! -f "$PUBSPEC" ]] && fail "${PUBSPEC} not found. Run this from your project root."
 
-VERSION_LINE=$(grep -E '^version:\s' "$PUBSPEC")
-VERSION=$(echo "$VERSION_LINE" | sed -E 's/version:\s*//;s/\+.*//')
-BUILD_NUMBER=$(echo "$VERSION_LINE" | sed -E 's/.*\+//')
+VERSION_LINE=$(grep -E '^version:[[:space:]]' "$PUBSPEC")
+VERSION=$(echo "$VERSION_LINE" | sed -E 's/version:[[:space:]]*//;s/\+.*//' | xargs)
+BUILD_NUMBER=$(echo "$VERSION_LINE" | sed -E 's/.*\+//' | xargs)
 
 info "Version: ${BOLD}${VERSION}+${BUILD_NUMBER}${NC}"
 info "Platform: ${BOLD}${PLATFORM}${NC}"
