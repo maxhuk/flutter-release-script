@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+RELEASE_SCRIPT_VERSION="1.0.0"
+RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
+
 # ═════════════════════════════════════════════════════════════
 #  Flutter Release Script  (fire-and-forget edition)
 #
@@ -25,9 +28,11 @@ BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'
 DIM='\033[2m'; NC='\033[0m'
 
 banner() {
+  local ver_label="v${RELEASE_SCRIPT_VERSION}"
+  local pad=$(( 24 - ${#ver_label} ))
   echo ""
   echo -e "${BLUE}╔══════════════════════════════════════════════════╗${NC}"
-  echo -e "${BLUE}║${NC}  ${BOLD}🚀 Flutter Release Tool${NC}                          ${BLUE}║${NC}"
+  echo -e "${BLUE}║${NC}  ${BOLD}🚀 Flutter Release Tool${NC}  ${DIM}${ver_label}${NC}$(printf '%*s' "$pad" '')${BLUE}║${NC}"
   echo -e "${BLUE}╚══════════════════════════════════════════════════╝${NC}"
   echo ""
 }
@@ -38,8 +43,29 @@ success() { echo -e "  ${GREEN}✔${NC}  $1"; }
 warn()    { echo -e "  ${YELLOW}⚠${NC}  $1"; }
 fail()    { echo -e "  ${RED}✘${NC}  $1"; exit 1; }
 
+# ── Version helpers ───────────────────────────────────────────
+version_gt() {
+  local IFS=.
+  local i a=($1) b=($2)
+  for ((i = 0; i < 3; i++)); do
+    if (( ${a[i]:-0} > ${b[i]:-0} )); then return 0; fi
+    if (( ${a[i]:-0} < ${b[i]:-0} )); then return 1; fi
+  done
+  return 1
+}
+
+check_update() {
+  local remote
+  remote=$(curl -fsSL --max-time 5 "$RELEASE_SCRIPT_REPO" 2>/dev/null) || return 1
+  local remote_ver
+  remote_ver=$(echo "$remote" | grep -m1 '^RELEASE_SCRIPT_VERSION=' | sed 's/.*="//;s/"//')
+  [[ -z "$remote_ver" ]] && return 1
+  echo "$remote_ver"
+}
+
 cleanup() {
   rm -rf "metadata/android" "metadata/ios"
+  rm -f "${_UPDATE_CHECK_FILE:-}" 2>/dev/null
 }
 trap cleanup EXIT
 
@@ -49,11 +75,30 @@ for arg in "$@"; do
     --dry-run)  DRY_RUN=true ;;
     --android)  PLATFORM="android" ;;
     --ios)      PLATFORM="ios" ;;
+    --version|-v)
+      echo "release.sh v${RELEASE_SCRIPT_VERSION}"
+      exit 0 ;;
+    --check-update)
+      echo -e "  Local:  ${BOLD}v${RELEASE_SCRIPT_VERSION}${NC}"
+      remote_ver=$(check_update) || fail "Could not reach ${RELEASE_SCRIPT_REPO}"
+      if version_gt "$remote_ver" "$RELEASE_SCRIPT_VERSION"; then
+        echo -e "  Remote: ${BOLD}v${remote_ver}${NC}"
+        echo ""
+        echo -e "  ${YELLOW}Update available!${NC} Download the latest version from:"
+        echo "  https://github.com/maxhuk/flutter-release-script"
+      else
+        echo -e "  Remote: ${BOLD}v${remote_ver}${NC}"
+        echo ""
+        success "You are up to date."
+      fi
+      exit 0 ;;
     --help|-h)
-      echo "Usage: ./release.sh [--dry-run] [--android|--ios]"
-      echo "  --dry-run   Walk through everything but skip uploads"
-      echo "  --android   Only build & release Android"
-      echo "  --ios       Only build & release iOS"
+      echo "Usage: ./release.sh [--dry-run] [--android|--ios] [--version] [--check-update]"
+      echo "  --dry-run       Walk through everything but skip uploads"
+      echo "  --android       Only build & release Android"
+      echo "  --ios           Only build & release iOS"
+      echo "  --version       Print script version and exit"
+      echo "  --check-update  Check for a newer version online"
       exit 0 ;;
     *) fail "Unknown flag: $arg  (try --help)" ;;
   esac
@@ -63,8 +108,20 @@ done
 [[ ! -f "$CONFIG_FILE" ]] && fail "Config not found at ${CONFIG_FILE}"
 source "$CONFIG_FILE"
 
+_UPDATE_CHECK_FILE=$(mktemp)
+( check_update > "$_UPDATE_CHECK_FILE" 2>/dev/null ) &
+_UPDATE_CHECK_PID=$!
+
 banner
 $DRY_RUN && warn "DRY RUN — nothing will be uploaded or submitted."
+
+if wait "$_UPDATE_CHECK_PID" 2>/dev/null; then
+  _REMOTE_VER=$(<"$_UPDATE_CHECK_FILE")
+  if [[ -n "$_REMOTE_VER" ]] && version_gt "$_REMOTE_VER" "$RELEASE_SCRIPT_VERSION"; then
+    warn "Update available: ${BOLD}v${RELEASE_SCRIPT_VERSION}${NC} ${YELLOW}→${NC} ${BOLD}v${_REMOTE_VER}${NC}  ${DIM}(run --check-update for details)${NC}"
+  fi
+fi
+rm -f "$_UPDATE_CHECK_FILE"
 
 # ══════════════════════════════════════════════════════════════
 #  READ VERSION
