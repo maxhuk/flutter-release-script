@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.0.2"
+RELEASE_SCRIPT_VERSION="1.0.3"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -349,14 +349,12 @@ build_asc_flags() {
   if [[ -n "${ASC_KEY_ID}" && -n "${ASC_ISSUER_ID}" && -f "${ASC_KEY_FILE}" ]]; then
     if [[ -z "$ASC_API_KEY_JSON" ]]; then
       ASC_API_KEY_JSON=$(mktemp "${TMPDIR:-/tmp}/asc_api_key.XXXXXX.json")
-      cat > "$ASC_API_KEY_JSON" <<JSON
-{
-  "key_id": "${ASC_KEY_ID}",
-  "issuer_id": "${ASC_ISSUER_ID}",
-  "key_filepath": "${ASC_KEY_FILE}",
-  "in_house": false
-}
-JSON
+      python3 -c "
+import json, sys
+with open(sys.argv[3]) as f:
+    key = f.read()
+print(json.dumps({'key_id': sys.argv[1], 'issuer_id': sys.argv[2], 'key': key, 'in_house': False}))
+" "$ASC_KEY_ID" "$ASC_ISSUER_ID" "$ASC_KEY_FILE" > "$ASC_API_KEY_JSON"
     fi
     ASC_FLAGS+=(--api_key_path "$ASC_API_KEY_JSON")
   fi
