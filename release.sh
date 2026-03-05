@@ -325,6 +325,7 @@ upload_android() {
   fastlane supply \
     --aab "$ANDROID_ARTIFACT" \
     --track "$PLAY_STORE_TRACK" \
+    --release_status "completed" \
     --package_name "$ANDROID_PACKAGE" \
     --json_key "$PLAY_STORE_KEY" \
     --skip_upload_metadata true \
@@ -422,6 +423,7 @@ else
       fastlane supply \
         --track "$PLAY_STORE_TRACK" \
         --track_promote_to production \
+        --track_promote_release_status completed \
         --package_name "$ANDROID_PACKAGE" \
         --json_key "$PLAY_STORE_KEY" \
         --skip_upload_apk true \
