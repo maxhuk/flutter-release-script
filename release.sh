@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.0.0"
+RELEASE_SCRIPT_VERSION="1.0.1"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
