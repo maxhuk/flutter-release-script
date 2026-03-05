@@ -20,6 +20,7 @@ RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-sc
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="${SCRIPT_DIR}/release.config"
 DRY_RUN=false
+NO_UPDATE=false
 PLATFORM="both"  # "both", "android", "ios"
 
 # ── Colors ───────────────────────────────────────────────────
@@ -54,18 +55,33 @@ version_gt() {
   return 1
 }
 
-check_update() {
-  local remote
-  remote=$(curl -fsSL --max-time 5 "$RELEASE_SCRIPT_REPO" 2>/dev/null) || return 1
+auto_update() {
+  local script_path="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
+  local tmpfile
+  tmpfile=$(mktemp)
+
+  curl -fsSL --max-time 10 "$RELEASE_SCRIPT_REPO" > "$tmpfile" 2>/dev/null \
+    || { rm -f "$tmpfile"; return; }
+
+  head -1 "$tmpfile" | grep -q '^#!/usr/bin/env bash' || { rm -f "$tmpfile"; return; }
+  grep -q '^RELEASE_SCRIPT_VERSION=' "$tmpfile"       || { rm -f "$tmpfile"; return; }
+
   local remote_ver
-  remote_ver=$(echo "$remote" | grep -m1 '^RELEASE_SCRIPT_VERSION=' | sed 's/.*="//;s/"//')
-  [[ -z "$remote_ver" ]] && return 1
-  echo "$remote_ver"
+  remote_ver=$(grep -m1 '^RELEASE_SCRIPT_VERSION=' "$tmpfile" | sed 's/.*="//;s/"//')
+
+  if ! version_gt "$remote_ver" "$RELEASE_SCRIPT_VERSION"; then
+    rm -f "$tmpfile"
+    return
+  fi
+
+  mv "$tmpfile" "$script_path"
+  chmod +x "$script_path"
+  success "Auto-updated: ${BOLD}v${RELEASE_SCRIPT_VERSION}${NC} ${GREEN}→${NC} ${BOLD}v${remote_ver}${NC}"
+  exec "$script_path" "$@"
 }
 
 cleanup() {
   rm -rf "metadata/android" "metadata/ios"
-  rm -f "${_UPDATE_CHECK_FILE:-}" 2>/dev/null
 }
 trap cleanup EXIT
 
@@ -75,30 +91,17 @@ for arg in "$@"; do
     --dry-run)  DRY_RUN=true ;;
     --android)  PLATFORM="android" ;;
     --ios)      PLATFORM="ios" ;;
+    --no-update)  NO_UPDATE=true ;;
     --version|-v)
       echo "release.sh v${RELEASE_SCRIPT_VERSION}"
       exit 0 ;;
-    --check-update)
-      echo -e "  Local:  ${BOLD}v${RELEASE_SCRIPT_VERSION}${NC}"
-      remote_ver=$(check_update) || fail "Could not reach ${RELEASE_SCRIPT_REPO}"
-      if version_gt "$remote_ver" "$RELEASE_SCRIPT_VERSION"; then
-        echo -e "  Remote: ${BOLD}v${remote_ver}${NC}"
-        echo ""
-        echo -e "  ${YELLOW}Update available!${NC} Download the latest version from:"
-        echo "  https://github.com/maxhuk/flutter-release-script"
-      else
-        echo -e "  Remote: ${BOLD}v${remote_ver}${NC}"
-        echo ""
-        success "You are up to date."
-      fi
-      exit 0 ;;
     --help|-h)
-      echo "Usage: ./release.sh [--dry-run] [--android|--ios] [--version] [--check-update]"
-      echo "  --dry-run       Walk through everything but skip uploads"
-      echo "  --android       Only build & release Android"
-      echo "  --ios           Only build & release iOS"
-      echo "  --version       Print script version and exit"
-      echo "  --check-update  Check for a newer version online"
+      echo "Usage: ./release.sh [--dry-run] [--android|--ios] [--no-update] [--version]"
+      echo "  --dry-run     Walk through everything but skip uploads"
+      echo "  --android     Only build & release Android"
+      echo "  --ios         Only build & release iOS"
+      echo "  --no-update   Skip auto-update check"
+      echo "  --version     Print script version and exit"
       exit 0 ;;
     *) fail "Unknown flag: $arg  (try --help)" ;;
   esac
@@ -108,20 +111,10 @@ done
 [[ ! -f "$CONFIG_FILE" ]] && fail "Config not found at ${CONFIG_FILE}"
 source "$CONFIG_FILE"
 
-_UPDATE_CHECK_FILE=$(mktemp)
-( check_update > "$_UPDATE_CHECK_FILE" 2>/dev/null ) &
-_UPDATE_CHECK_PID=$!
-
 banner
 $DRY_RUN && warn "DRY RUN — nothing will be uploaded or submitted."
 
-if wait "$_UPDATE_CHECK_PID" 2>/dev/null; then
-  _REMOTE_VER=$(<"$_UPDATE_CHECK_FILE")
-  if [[ -n "$_REMOTE_VER" ]] && version_gt "$_REMOTE_VER" "$RELEASE_SCRIPT_VERSION"; then
-    warn "Update available: ${BOLD}v${RELEASE_SCRIPT_VERSION}${NC} ${YELLOW}→${NC} ${BOLD}v${_REMOTE_VER}${NC}  ${DIM}(run --check-update for details)${NC}"
-  fi
-fi
-rm -f "$_UPDATE_CHECK_FILE"
+! $NO_UPDATE && auto_update "$@"
 
 # ══════════════════════════════════════════════════════════════
 #  READ VERSION
