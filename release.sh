@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.0.3"
+RELEASE_SCRIPT_VERSION="1.0.4"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -399,6 +399,7 @@ upload_ios() {
     --skip_binary_upload true \
     --skip_screenshots true \
     --skip_metadata false \
+    --precheck_include_in_app_purchases false \
     --metadata_path "$metadata_dir" \
     --force true \
     "${ASC_FLAGS[@]}"
@@ -457,6 +458,7 @@ else
       --skip_binary_upload true \
       --skip_screenshots true \
       --skip_metadata true \
+      --precheck_include_in_app_purchases false \
       --force true \
       "${ASC_FLAGS[@]}"
 
