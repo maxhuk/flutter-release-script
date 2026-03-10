@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.0.4"
+RELEASE_SCRIPT_VERSION="1.0.5"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -81,7 +81,7 @@ auto_update() {
 }
 
 cleanup() {
-  rm -rf "metadata/android" "metadata/ios"
+  rm -rf ".release_metadata"
   [[ -n "${ASC_API_KEY_JSON}" ]] && rm -f "$ASC_API_KEY_JSON"
 }
 trap cleanup EXIT
@@ -302,7 +302,7 @@ fi
 upload_android() {
   step "Uploading to Google Play (${PLAY_STORE_TRACK})"
 
-  local metadata_dir="metadata/android"
+  local metadata_dir=".release_metadata/android"
   rm -rf "$metadata_dir"
 
   for entry in "${LANGUAGE_MAP[@]}"; do
@@ -364,7 +364,7 @@ upload_ios() {
   step "Uploading to App Store Connect"
   build_asc_flags
 
-  local metadata_dir="metadata/ios"
+  local metadata_dir=".release_metadata/ios"
   rm -rf "$metadata_dir"
 
   for entry in "${LANGUAGE_MAP[@]}"; do
@@ -459,6 +459,7 @@ else
       --skip_screenshots true \
       --skip_metadata true \
       --precheck_include_in_app_purchases false \
+      --metadata_path ".release_metadata/ios" \
       --force true \
       "${ASC_FLAGS[@]}"
 
