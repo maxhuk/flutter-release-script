@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.0.5"
+RELEASE_SCRIPT_VERSION="1.0.6"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -466,6 +466,8 @@ else
     success "iOS: submitted for review"
   fi
 fi
+
+cleanup
 
 # ══════════════════════════════════════════════════════════════
 #  GIT TAG
