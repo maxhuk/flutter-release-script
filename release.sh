@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.1.0"
+RELEASE_SCRIPT_VERSION="1.2.0"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -89,6 +89,7 @@ cleanup() {
   # early exit (--version, a failed check) would otherwise die in the trap under
   # `set -u` and bury the real message.
   [[ -n "${ASC_API_KEY_JSON:-}" ]] && rm -f "$ASC_API_KEY_JSON"
+  [[ -n "${RECONCILE_DIR:-}"    ]] && rm -rf "$RECONCILE_DIR"
   return 0
 }
 trap cleanup EXIT
@@ -587,6 +588,272 @@ print(json.dumps({'key_id': sys.argv[1], 'issuer_id': sys.argv[2], 'key': key, '
   fi
 }
 
+# ── Screenshot reconciliation ────────────────────────────────
+#
+# deliver checks its own screenshot uploads by reading App Store Connect's
+# listing back, and that listing is eventually consistent. A screenshot that
+# uploaded fine but is not listed yet is reported "missing on App Store
+# Connect", so the retry pass uploads it a second time; the set then hits
+# Apple's limit of 10 per device and the tail of the spread is skipped with
+# "Too many screenshots found for device". The run still exits 0, so the first
+# you hear of it is a listing with duplicates and a missing last screenshot.
+#
+# There is no deliver option that avoids this (screenshot_processing_timeout
+# does not apply — the wait loop exits early rather than timing out), so we read
+# the settled state back ourselves and repair it. Set RECONCILE_SCREENSHOTS to
+# false in release.config to skip; SCREENSHOT_SETTLE_TIMEOUT tunes how long to
+# wait for App Store Connect to stop moving.
+RECONCILE_DIR=""
+
+write_reconcile_fastfile() {
+  mkdir -p "${RECONCILE_DIR}/fastlane"
+  cat > "${RECONCILE_DIR}/fastlane/Fastfile" <<'RECONCILE_RUBY'
+# frozen_string_literal: true
+#
+# Written by release.sh — regenerated every run, don't edit in place.
+
+require 'digest/md5'
+require 'naturally'
+require 'deliver/loader'
+
+SET_LIMIT = 10
+
+# --- pure helpers (unit-tested) ---
+
+# Identity of a screenshot, matching how deliver names remote files after the
+# local basename. Content alone is not enough: two byte-identical files under
+# different names are two different slots in the spread.
+def screenshot_key(file_name, checksum)
+  "#{file_name}/#{checksum}"
+end
+
+# Pure. Works out what has to change for one screenshot set, given the App
+# Store's list and the numbered files on disk. Returns [to_delete, to_upload].
+#
+# Precondition: every remote entry has a checksum. A nil one means the asset is
+# still being ingested, and planning against it would re-upload a file that is
+# already on its way up — the exact duplicate this lane exists to undo. Callers
+# settle first and skip the set if anything is still moving.
+def plan_set(remote, local)
+  raise 'plan_set called on an unsettled set' if remote.any? { |r| r[:checksum].nil? }
+
+  wanted = local.map { |l| l[:key] }
+  kept = {}
+  to_delete = []
+
+  remote.each do |r|
+    if !wanted.include?(r[:key]) || kept[r[:key]]
+      to_delete << r
+    else
+      kept[r[:key]] = true
+    end
+  end
+
+  [to_delete, local.reject { |l| kept[l[:key]] }]
+end
+
+# --- end pure helpers ---
+
+def load_local_screenshots(path)
+  by_locale = Hash.new { |h, k| h[k] = Hash.new { |i, j| i[j] = [] } }
+
+  Deliver::Loader.load_app_screenshots(path, true).each do |shot|
+    next if shot.display_type.nil?
+    file_name = File.basename(shot.path)
+    checksum = Digest::MD5.hexdigest(File.binread(shot.path))
+    by_locale[shot.language][shot.display_type] << {
+      file_name: file_name,
+      checksum: checksum,
+      key: screenshot_key(file_name, checksum),
+      path: shot.path
+    }
+  end
+
+  by_locale.each_value do |by_type|
+    by_type.each_value do |list|
+      list.replace(Naturally.sort_by(list) { |e| e[:file_name] })
+    end
+  end
+  by_locale
+end
+
+def unsettled?(set)
+  (set.app_screenshots || []).any? { |s| !s.complete? || s.source_file_checksum.nil? }
+end
+
+def read_sets(version, locales)
+  version.get_app_store_version_localizations
+         .select { |loc| locales.include?(loc.locale) }
+         .flat_map { |loc| loc.get_app_screenshot_sets.map { |set| [loc, set] } }
+end
+
+# Two identical reads with nothing in flight is the closest thing to a
+# read-your-writes guarantee this API offers, and skipping it is exactly how
+# deliver ends up duplicating files.
+def settle(version, locales, timeout)
+  deadline = Time.now + timeout
+  previous = nil
+
+  loop do
+    pairs = read_sets(version, locales)
+    shots = pairs.flat_map { |_, set| set.app_screenshots || [] }
+    in_flight = shots.count { |s| !s.complete? || s.source_file_checksum.nil? }
+    fingerprint = shots.map { |s| [s.id, s.source_file_checksum, s.asset_delivery_state['state']] }.sort
+
+    return pairs if in_flight.zero? && fingerprint == previous
+
+    if Time.now > deadline
+      UI.important("Screenshot state did not settle within #{timeout}s — #{in_flight} still processing.")
+      return pairs
+    end
+
+    previous = fingerprint
+    sleep(5)
+  end
+end
+
+def apply_plan(loc, set, to_delete, to_upload)
+  to_delete.each do |r|
+    UI.message("  #{loc.locale} #{set.screenshot_display_type}: removing extra #{r[:file_name]}")
+    r[:obj].delete!
+  end
+
+  room = SET_LIMIT - ((set.app_screenshots || []).size - to_delete.size)
+  if to_upload.size > room
+    UI.user_error!("#{loc.locale} #{set.screenshot_display_type} needs #{to_upload.size} more " \
+                   "screenshot(s) but only #{room} slot(s) are free (Apple allows #{SET_LIMIT}).")
+  end
+
+  to_upload.each do |l|
+    UI.message("  #{loc.locale} #{set.screenshot_display_type}: re-uploading #{l[:file_name]}")
+    set.upload_screenshot(path: l[:path], wait_for_processing: true)
+  end
+end
+
+lane :reconcile_screenshots do
+  screenshots_path = ENV.fetch('RS_SCREENSHOTS_PATH')
+  bundle_id = ENV.fetch('RS_BUNDLE_ID')
+  app_version = ENV.fetch('RS_APP_VERSION')
+  settle_timeout = Integer(ENV.fetch('RS_SETTLE_TIMEOUT', '300'))
+
+  Spaceship::ConnectAPI.token =
+    Spaceship::ConnectAPI::Token.from_json_file(ENV.fetch('RS_ASC_API_KEY_JSON'))
+
+  app = Spaceship::ConnectAPI::App.find(bundle_id)
+  UI.user_error!("No app found for #{bundle_id}") if app.nil?
+
+  version = app.get_edit_app_store_version(platform: Spaceship::ConnectAPI::Platform::IOS)
+  UI.user_error!("No editable version for #{bundle_id}") if version.nil?
+  unless version.version_string == app_version
+    UI.user_error!("Editable version on App Store Connect is #{version.version_string}, expected #{app_version}")
+  end
+
+  local = load_local_screenshots(screenshots_path)
+  UI.user_error!("No screenshots found under #{screenshots_path}") if local.empty?
+  locales = local.keys
+
+  repaired = 0
+  3.times do
+    changes = 0
+
+    settle(version, locales, settle_timeout).each do |loc, set|
+      expected = local[loc.locale][set.screenshot_display_type]
+      # A display type we didn't push is none of our business.
+      next if expected.empty?
+      # settle() already waited it out; if it is still moving, don't guess.
+      next if unsettled?(set)
+
+      remote = (set.app_screenshots || []).map do |s|
+        { id: s.id, file_name: s.file_name, checksum: s.source_file_checksum,
+          key: screenshot_key(s.file_name, s.source_file_checksum), obj: s }
+      end
+
+      to_delete, to_upload = plan_set(remote, expected)
+      next if to_delete.empty? && to_upload.empty?
+
+      changes += to_delete.size + to_upload.size
+      apply_plan(loc, set, to_delete, to_upload)
+    end
+
+    break if changes.zero?
+    repaired += changes
+  end
+
+  # Final read: verify, then put the spread back in numbered order.
+  problems = []
+  settle(version, locales, settle_timeout).each do |loc, set|
+    expected = local[loc.locale][set.screenshot_display_type]
+    next if expected.empty?
+
+    if unsettled?(set)
+      problems << "#{loc.locale} #{set.screenshot_display_type}: still processing on App Store Connect"
+      next
+    end
+
+    remote = (set.app_screenshots || [])
+    remote_keys = remote.map { |s| screenshot_key(s.file_name, s.source_file_checksum) }.sort
+    if remote_keys != expected.map { |e| e[:key] }.sort
+      problems << "#{loc.locale} #{set.screenshot_display_type}: " \
+                  "#{remote.size} on App Store Connect, expected #{expected.size}"
+      next
+    end
+
+    sorted_ids = Naturally.sort(remote, by: :file_name).map(&:id)
+    set.reorder_screenshots(app_screenshot_ids: sorted_ids) if remote.map(&:id) != sorted_ids
+    UI.success("  #{loc.locale} #{set.screenshot_display_type}: #{remote.size} screenshot(s), in order")
+  end
+
+  unless problems.empty?
+    UI.user_error!("Screenshots on App Store Connect do not match the local spread:\n  #{problems.join("\n  ")}")
+  end
+
+  if repaired.zero?
+    UI.success("Screenshots already matched the local spread — nothing to repair.")
+  else
+    UI.success("Repaired #{repaired} screenshot(s) that deliver had duplicated or dropped.")
+  end
+end
+RECONCILE_RUBY
+}
+
+reconcile_ios_screenshots() {
+  local screenshots_dir="$1" abs_dir
+
+  if ! ${RECONCILE_SCREENSHOTS:-true}; then
+    warn "Screenshot reconciliation disabled in ${CONFIG_FILE}."
+    return 0
+  fi
+
+  # Reconciliation talks to App Store Connect directly. The Apple ID path would
+  # need its own interactive login, which defeats a fire-and-forget release.
+  if [[ -z "$ASC_API_KEY_JSON" ]]; then
+    warn "No App Store Connect API key — skipping screenshot reconciliation."
+    warn "Check the spread by hand: deliver can leave duplicates behind."
+    return 0
+  fi
+
+  if [[ ! -d "$screenshots_dir" ]]; then
+    warn "No screenshots were assembled — nothing to reconcile."
+    return 0
+  fi
+
+  abs_dir="$(cd "$screenshots_dir" && pwd)"
+  RECONCILE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/rs_reconcile.XXXXXX")
+  write_reconcile_fastfile
+
+  info "Verifying screenshots on App Store Connect..."
+  (
+    cd "$RECONCILE_DIR" || exit 1
+    RS_ASC_API_KEY_JSON="$ASC_API_KEY_JSON" \
+    RS_BUNDLE_ID="$IOS_BUNDLE_ID" \
+    RS_APP_VERSION="$VERSION" \
+    RS_SCREENSHOTS_PATH="$abs_dir" \
+    RS_SETTLE_TIMEOUT="${SCREENSHOT_SETTLE_TIMEOUT:-300}" \
+    FASTLANE_SKIP_UPDATE_CHECK=1 \
+      fastlane reconcile_screenshots
+  ) || fail "Screenshot reconciliation failed — fix the spread on App Store Connect before submitting."
+}
+
 upload_ios() {
   step "Uploading to App Store Connect"
   build_asc_flags
@@ -650,8 +917,12 @@ upload_ios() {
     "${ASC_FLAGS[@]}"
 
   success "App Store changelogs set"
-  $PUSH_METADATA    && success "App Store: listing text updated"
-  $PUSH_SCREENSHOTS && success "App Store: screenshots replaced"
+  $PUSH_METADATA && success "App Store: listing text updated"
+
+  if $PUSH_SCREENSHOTS; then
+    reconcile_ios_screenshots "$screenshots_dir"
+    success "App Store: screenshots replaced"
+  fi
   return 0
 }
 

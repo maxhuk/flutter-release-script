@@ -71,6 +71,10 @@ SCREENSHOT_ALIAS=( "ru-RU:uk" )
 Field lengths are checked against the store maxima before the build starts, in
 characters rather than bytes, and an over-long field stops the run.
 
+After the iOS screenshot upload the script reads the spread back from App Store
+Connect and repairs it if it doesn't match the local tree — see
+[Screenshot reconciliation](#screenshot-reconciliation).
+
 Two things worth knowing before your first `--all`:
 
 - **Both stores replace rather than merge.** Listing text is overwritten and
@@ -84,6 +88,42 @@ Two things worth knowing before your first `--all`:
 
 The feature graphic and app icon are never uploaded; those are set once in the
 console.
+
+## Screenshot reconciliation
+
+`fastlane deliver` checks its own screenshot uploads by reading App Store
+Connect's listing back, and that listing is eventually consistent. A screenshot
+that uploaded fine but isn't listed yet gets reported as
+
+```
+01.png is missing on App Store Connect.
+Failed to upload all screenshots... Tries remaining: 4
+```
+
+so the retry pass uploads it a second time. The set then hits Apple's limit of
+10 per device and the rest of the spread is dropped with `Too many screenshots
+found for device`. **The run still exits 0**, so the first you hear of it is a
+live listing with duplicates and a missing last screenshot. No `deliver` option
+avoids this — `screenshot_processing_timeout` doesn't apply, because the wait
+loop exits early rather than timing out.
+
+So after the upload the script waits for App Store Connect to stop moving (two
+identical reads with nothing in flight), compares each set against the local
+tree by filename and MD5, then deletes duplicates and anything stale, re-uploads
+anything genuinely missing, and puts the spread back in numbered order. If it
+can't get the sets to match it fails the run **before** submitting for review.
+
+It only touches locale/device combinations your tree actually covers, never
+deletes an asset that's still processing, and does nothing at all when the
+listing already matches — the normal case, which costs about 25 seconds.
+
+```bash
+RECONCILE_SCREENSHOTS=false     # skip it entirely (default: true)
+SCREENSHOT_SETTLE_TIMEOUT=300   # seconds to wait for ASC to settle
+```
+
+Reconciliation needs the App Store Connect API key; on the Apple ID login path
+it warns and skips, since it would need its own interactive login.
 
 ## What's New file format
 
