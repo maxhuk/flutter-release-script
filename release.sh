@@ -348,6 +348,14 @@ assemble_android_screenshots() {
   done
 }
 
+# Length of a file in characters, for the same reason the limit check below
+# counts them: `wc -c` reports a Cyrillic or CJK field at roughly double its
+# length, and these numbers are printed next to the store maxima. Trailing
+# newline dropped so a preview matches what the check measures.
+char_count() {
+  python3 -c 'import sys; print(len(open(sys.argv[1], encoding="utf-8").read().rstrip("\n")))' "$1"
+}
+
 # Field lengths in characters against the store limits. Not bytes: every limit
 # below is a character count, and a Cyrillic or CJK listing is roughly twice as
 # many bytes as characters — `wc -c` would report a compliant field as double
@@ -535,7 +543,7 @@ upload_android() {
   if $DRY_RUN; then
     warn "[DRY RUN] Would upload ${ANDROID_ARTIFACT}"
     find "$metadata_dir" -path '*/changelogs/*' -name '*.txt' | while read -r f; do
-      warn "[DRY RUN] Changelog: $f ($(wc -c < "$f" | tr -d ' ') chars)"
+      warn "[DRY RUN] Changelog: $f ($(char_count "$f") chars)"
     done
     if $PUSH_METADATA || $PUSH_SCREENSHOTS; then
       warn "[DRY RUN] Listing tree:"
@@ -886,7 +894,7 @@ upload_ios() {
   if $DRY_RUN; then
     warn "[DRY RUN] Would upload ${IOS_ARTIFACT}"
     find "$metadata_dir" -name '*.txt' | sort | while read -r f; do
-      warn "[DRY RUN] ${f#"$metadata_dir"/} ($(wc -c < "$f" | tr -d ' ') chars)"
+      warn "[DRY RUN] ${f#"$metadata_dir"/} ($(char_count "$f") chars)"
     done
     if $PUSH_SCREENSHOTS; then
       find "$screenshots_dir" -name '*.png' | sort | while read -r f; do
