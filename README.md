@@ -161,5 +161,6 @@ Edit `release.config` — it has comments explaining each field. The key things:
 - `LANGUAGE_MAP` — maps `<lang>` tags to store locale codes (format: `file_tag:play_locale:app_store_locale`)
 - `PLAY_STORE_KEY` / `ASC_KEY_*` — paths to your store credentials
 - `FLUTTER_BUILD_FLAGS` — e.g. `"--flavor prod --dart-define=ENV=production"`
+- `FLUTTER_CMD` — how Flutter is invoked; set it to `"fvm flutter"` on a project that pins its SDK
 
 Add `keys/` to your `.gitignore`.

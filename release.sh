@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.2.0"
+RELEASE_SCRIPT_VERSION="1.3.0"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -130,6 +130,13 @@ if $PUSH_METADATA || $PUSH_SCREENSHOTS; then
   [[ -z "${LISTING_DIR:-}" ]] && fail "--metadata / --screenshots need LISTING_DIR set in ${CONFIG_FILE}"
   [[ ! -d "$LISTING_DIR"  ]] && fail "LISTING_DIR not found: ${LISTING_DIR}"
 fi
+
+# How to invoke Flutter. A plain "flutter" for most projects, "fvm flutter" for
+# one that pins its SDK — hence an array rather than a string, so the wrapper
+# and its subcommand stay separate words without an eval.
+read -r -a FLUTTER <<< "${FLUTTER_CMD:-flutter}"
+command -v "${FLUTTER[0]}" > /dev/null 2>&1 \
+  || fail "${FLUTTER[0]} not found in PATH (FLUTTER_CMD=\"${FLUTTER_CMD:-flutter}\")"
 
 banner
 $DRY_RUN && warn "DRY RUN — nothing will be uploaded or submitted."
@@ -480,16 +487,16 @@ fi
 
 step "Building"
 
-flutter clean > /dev/null 2>&1
-success "flutter clean"
+"${FLUTTER[@]}" clean > /dev/null 2>&1
+success "${FLUTTER[*]} clean"
 
 ANDROID_ARTIFACT=""
 IOS_ARTIFACT=""
 
 if [[ "$PLATFORM" == "both" || "$PLATFORM" == "android" ]]; then
-  info "flutter build ${ANDROID_BUILD_TYPE}..."
+  info "${FLUTTER[*]} build ${ANDROID_BUILD_TYPE}..."
   # shellcheck disable=SC2086
-  flutter build "$ANDROID_BUILD_TYPE" $FLUTTER_BUILD_FLAGS
+  "${FLUTTER[@]}" build "$ANDROID_BUILD_TYPE" $FLUTTER_BUILD_FLAGS
 
   if [[ "$ANDROID_BUILD_TYPE" == "appbundle" ]]; then
     ANDROID_ARTIFACT=$(find build/app/outputs/bundle -name '*.aab' 2>/dev/null | head -1)
@@ -501,9 +508,9 @@ if [[ "$PLATFORM" == "both" || "$PLATFORM" == "android" ]]; then
 fi
 
 if [[ "$PLATFORM" == "both" || "$PLATFORM" == "ios" ]]; then
-  info "flutter build ipa..."
+  info "${FLUTTER[*]} build ipa..."
   # shellcheck disable=SC2086
-  flutter build ipa $FLUTTER_BUILD_FLAGS
+  "${FLUTTER[@]}" build ipa $FLUTTER_BUILD_FLAGS
 
   IOS_ARTIFACT=$(find build/ios/ipa -name '*.ipa' 2>/dev/null | head -1)
   [[ -z "$IOS_ARTIFACT" ]] && fail "iOS artifact not found!"
