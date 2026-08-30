@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.3.0"
+RELEASE_SCRIPT_VERSION="1.4.0"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -515,6 +515,32 @@ if [[ "$PLATFORM" == "both" || "$PLATFORM" == "ios" ]]; then
   IOS_ARTIFACT=$(find build/ios/ipa -name '*.ipa' 2>/dev/null | head -1)
   [[ -z "$IOS_ARTIFACT" ]] && fail "iOS artifact not found!"
   success "iOS: ${IOS_ARTIFACT}"
+fi
+
+# ══════════════════════════════════════════════════════════════
+#  POST-BUILD HOOK
+# ══════════════════════════════════════════════════════════════
+
+# Documented for users in release.config. Placed here because it is the only
+# point where every artifact exists and no store has been touched: a hook that
+# fails costs nothing, where the same failure after an upload costs a version
+# number. Hence the abort rather than a warning.
+if [[ -n "${POST_BUILD_HOOK:-}" ]]; then
+  step "Post-build hook"
+
+  if $DRY_RUN; then
+    warn "[DRY RUN] Would run: ${POST_BUILD_HOOK}"
+  else
+    info "${POST_BUILD_HOOK}"
+    ANDROID_ARTIFACT="$ANDROID_ARTIFACT" \
+    IOS_ARTIFACT="$IOS_ARTIFACT" \
+    VERSION="$VERSION" \
+    BUILD_NUMBER="$BUILD_NUMBER" \
+    PLATFORM="$PLATFORM" \
+      bash -c "$POST_BUILD_HOOK" \
+      || fail "Post-build hook failed — nothing uploaded."
+    success "Post-build hook finished"
+  fi
 fi
 
 # ══════════════════════════════════════════════════════════════

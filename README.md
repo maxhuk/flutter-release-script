@@ -125,6 +125,26 @@ SCREENSHOT_SETTLE_TIMEOUT=300   # seconds to wait for ASC to settle
 Reconciliation needs the App Store Connect API key; on the Apple ID login path
 it warns and skips, since it would need its own interactive login.
 
+## Post-build hook
+
+A command run once after every requested platform has built, and before anything
+is uploaded — for work that needs the build outputs on disk while the release can
+still be aborted: uploading debug symbols or source maps to a crash reporter,
+notarizing a macOS build, writing a build manifest.
+
+```bash
+POST_BUILD_HOOK="fvm dart run sentry_dart_plugin"
+```
+
+It runs from the project root with `ANDROID_ARTIFACT`, `IOS_ARTIFACT`, `VERSION`,
+`BUILD_NUMBER` and `PLATFORM` exported. The artifact variables are empty for a
+platform that was not built.
+
+A non-zero exit aborts the release before either store is touched — failing here
+costs nothing, failing after an upload costs a version number. A hook that would
+rather warn than block should end in `|| true`. `--dry-run` prints the command
+instead of running it.
+
 ## What's New file format
 
 The script reads your existing changelog format — version headers with `<lang>` blocks:
