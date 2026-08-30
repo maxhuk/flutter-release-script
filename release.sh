@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.3.0"
+RELEASE_SCRIPT_VERSION="1.4.0"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -515,6 +515,37 @@ if [[ "$PLATFORM" == "both" || "$PLATFORM" == "ios" ]]; then
   IOS_ARTIFACT=$(find build/ios/ipa -name '*.ipa' 2>/dev/null | head -1)
   [[ -z "$IOS_ARTIFACT" ]] && fail "iOS artifact not found!"
   success "iOS: ${IOS_ARTIFACT}"
+fi
+
+# ══════════════════════════════════════════════════════════════
+#  POST-BUILD HOOK
+# ══════════════════════════════════════════════════════════════
+
+# Runs once, after every requested platform has built and before anything is
+# uploaded. Meant for work that needs the build outputs still on disk and the
+# release still abortable: uploading debug symbols or source maps to a crash
+# reporter, notarizing, recording a build manifest.
+#
+# It runs from the project root with ANDROID_ARTIFACT, IOS_ARTIFACT, VERSION,
+# BUILD_NUMBER and PLATFORM exported, so a one-liner can reach them without the
+# config having to repeat any of it. A non-zero exit stops the release: nothing
+# has been sent to either store yet, so failing here is the cheap place to fail.
+if [[ -n "${POST_BUILD_HOOK:-}" ]]; then
+  step "Post-build hook"
+
+  if $DRY_RUN; then
+    warn "[DRY RUN] Would run: ${POST_BUILD_HOOK}"
+  else
+    info "${POST_BUILD_HOOK}"
+    ANDROID_ARTIFACT="$ANDROID_ARTIFACT" \
+    IOS_ARTIFACT="$IOS_ARTIFACT" \
+    VERSION="$VERSION" \
+    BUILD_NUMBER="$BUILD_NUMBER" \
+    PLATFORM="$PLATFORM" \
+      bash -c "$POST_BUILD_HOOK" \
+      || fail "Post-build hook failed — nothing uploaded."
+    success "Post-build hook finished"
+  fi
 fi
 
 # ══════════════════════════════════════════════════════════════
