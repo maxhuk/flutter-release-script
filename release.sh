@@ -521,15 +521,10 @@ fi
 #  POST-BUILD HOOK
 # ══════════════════════════════════════════════════════════════
 
-# Runs once, after every requested platform has built and before anything is
-# uploaded. Meant for work that needs the build outputs still on disk and the
-# release still abortable: uploading debug symbols or source maps to a crash
-# reporter, notarizing, recording a build manifest.
-#
-# It runs from the project root with ANDROID_ARTIFACT, IOS_ARTIFACT, VERSION,
-# BUILD_NUMBER and PLATFORM exported, so a one-liner can reach them without the
-# config having to repeat any of it. A non-zero exit stops the release: nothing
-# has been sent to either store yet, so failing here is the cheap place to fail.
+# Documented for users in release.config. Placed here because it is the only
+# point where every artifact exists and no store has been touched: a hook that
+# fails costs nothing, where the same failure after an upload costs a version
+# number. Hence the abort rather than a warning.
 if [[ -n "${POST_BUILD_HOOK:-}" ]]; then
   step "Post-build hook"
 
