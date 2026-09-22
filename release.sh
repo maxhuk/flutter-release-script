@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.4.0"
+RELEASE_SCRIPT_VERSION="1.4.1"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -1057,4 +1057,9 @@ echo -e "${GREEN}╔════════════════════
 echo -e "${GREEN}║${NC}  ${BOLD}🎉 Done!  ${VERSION}+${BUILD_NUMBER}${NC}$(printf '%*s' $((28 - ${#VERSION} - ${#BUILD_NUMBER})) '')${GREEN}║${NC}"
 echo -e "${GREEN}╚══════════════════════════════════════════════════╝${NC}"
 echo ""
-$DRY_RUN && echo -e "  ${YELLOW}(dry run — nothing was uploaded)${NC}" && echo ""
+# The script's exit status is that of its last command, so this can't be
+# `$DRY_RUN && echo …` — a real release would exit 1.
+if $DRY_RUN; then
+  echo -e "  ${YELLOW}(dry run — nothing was uploaded)${NC}"
+  echo ""
+fi
