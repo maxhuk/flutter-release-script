@@ -610,6 +610,9 @@ upload_android() {
 #  UPLOAD TO APP STORE
 # ══════════════════════════════════════════════════════════════
 
+# Empty when no API key is configured. bash 3.2, the macOS default, treats an
+# empty "${ASC_FLAGS[@]}" as unbound under set -u, so every use goes through
+# the ${ASC_FLAGS[@]+…} guard.
 ASC_FLAGS=()
 ASC_API_KEY_JSON=""
 
@@ -941,7 +944,7 @@ upload_ios() {
     --ipa "$IOS_ARTIFACT" \
     --app_identifier "$IOS_BUNDLE_ID" \
     --skip_waiting_for_build_processing true \
-    "${ASC_FLAGS[@]}"
+    ${ASC_FLAGS[@]+"${ASC_FLAGS[@]}"}
 
   success "IPA uploaded"
 
@@ -955,7 +958,7 @@ upload_ios() {
     --metadata_path "$metadata_dir" \
     --force true \
     ${shot_flags[@]+"${shot_flags[@]}"} \
-    "${ASC_FLAGS[@]}"
+    ${ASC_FLAGS[@]+"${ASC_FLAGS[@]}"}
 
   success "App Store changelogs set"
   $PUSH_METADATA && success "App Store: listing text updated"
@@ -1021,7 +1024,7 @@ else
       --precheck_include_in_app_purchases false \
       --metadata_path ".release_metadata/ios" \
       --force true \
-      "${ASC_FLAGS[@]}"
+      ${ASC_FLAGS[@]+"${ASC_FLAGS[@]}"}
 
     success "iOS: submitted for review"
   fi
