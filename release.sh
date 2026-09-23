@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-RELEASE_SCRIPT_VERSION="1.4.1"
+RELEASE_SCRIPT_VERSION="1.4.2"
 RELEASE_SCRIPT_REPO="https://raw.githubusercontent.com/maxhuk/flutter-release-script/main/release.sh"
 
 # ═════════════════════════════════════════════════════════════
@@ -25,6 +25,13 @@ NO_UPDATE=false
 PLATFORM="both"  # "both", "android", "ios"
 PUSH_METADATA=false
 PUSH_SCREENSHOTS=false
+
+# fastlane reads the text it uploads in the locale's encoding, so without a
+# UTF-8 locale it crashes on the first non-ASCII changelog. Terminals set one;
+# shells started by agents, CI or cron may not.
+if [[ "$(locale charmap 2>/dev/null)" != "UTF-8" ]]; then
+  export LC_ALL=en_US.UTF-8 LANG=en_US.UTF-8
+fi
 
 # ── Colors ───────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
